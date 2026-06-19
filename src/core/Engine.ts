@@ -11,14 +11,17 @@ export interface EngineOptions {
   maxPixelRatio?: number;
 }
 
+type ResizeListener = (width: number, height: number) => void;
+
 /**
  * Minimal, reusable render harness around a single WebGL canvas.
  *
  * Responsibilities kept here so feature code stays focused on *what* to draw:
  *  - renderer / scene / camera lifecycle
  *  - a clamped, delta-timed animation loop
- *  - DPR-capped, observer-driven resize
+ *  - DPR-capped, observer-driven resize (with listener hooks for post-processing)
  *  - automatic pause when the tab is hidden (saves battery / GPU)
+ *  - an optional render step override so a feature can drive an EffectComposer
  *  - deterministic teardown via {@link dispose}
  */
 export class Engine {
@@ -29,8 +32,12 @@ export class Engine {
   private readonly canvas: HTMLCanvasElement;
   private readonly clock = new Clock();
   private readonly tickables = new Set<Tickable>();
+  private readonly resizeListeners = new Set<ResizeListener>();
   private readonly maxPixelRatio: number;
   private readonly resizeObserver: ResizeObserver;
+  private renderStep: (() => void) | null = null;
+  private width = 1;
+  private height = 1;
   private running = false;
 
   constructor(canvas: HTMLCanvasElement, options: EngineOptions = {}) {
@@ -66,6 +73,23 @@ export class Engine {
     this.tickables.delete(tickable);
   }
 
+  /**
+   * Override the per-frame render call (e.g. to drive an EffectComposer).
+   * Pass `null` to restore the default `renderer.render(scene, camera)`.
+   */
+  setRenderStep(step: (() => void) | null): void {
+    this.renderStep = step;
+  }
+
+  /** Subscribe to resize events. Fires once immediately with the current size. */
+  onResize(listener: ResizeListener): () => void {
+    this.resizeListeners.add(listener);
+    listener(this.width, this.height);
+    return () => {
+      this.resizeListeners.delete(listener);
+    };
+  }
+
   start(): void {
     if (this.running) return;
     this.running = true;
@@ -85,7 +109,8 @@ export class Engine {
     const dt = Math.min(this.clock.getDelta(), 1 / 30);
     const elapsed = this.clock.elapsedTime;
     for (const tickable of this.tickables) tickable.update(dt, elapsed);
-    this.renderer.render(this.scene, this.camera);
+    if (this.renderStep) this.renderStep();
+    else this.renderer.render(this.scene, this.camera);
   };
 
   private readonly handleVisibility = (): void => {
@@ -94,20 +119,23 @@ export class Engine {
   };
 
   private resize(): void {
-    const width = this.canvas.clientWidth || window.innerWidth;
-    const height = this.canvas.clientHeight || window.innerHeight;
+    this.width = this.canvas.clientWidth || window.innerWidth;
+    this.height = this.canvas.clientHeight || window.innerHeight;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.maxPixelRatio));
-    this.renderer.setSize(width, height, false);
-    this.camera.aspect = width / height;
+    this.renderer.setSize(this.width, this.height, false);
+    this.camera.aspect = this.width / this.height;
     this.camera.updateProjectionMatrix();
+    for (const listener of this.resizeListeners) listener(this.width, this.height);
   }
 
   dispose(): void {
     this.stop();
+    this.renderStep = null;
     this.resizeObserver.disconnect();
     document.removeEventListener('visibilitychange', this.handleVisibility);
     for (const tickable of this.tickables) tickable.dispose?.();
     this.tickables.clear();
+    this.resizeListeners.clear();
     this.renderer.dispose();
   }
 }
