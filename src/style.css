@@ -17,15 +17,18 @@ body {
   background: #04050a;
   color: #cfe0ff;
   font-family:
-    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
 #scene {
   display: block;
-  /* dvw/dvh track the dynamic viewport (mobile URL bars) and fall back to vw/vh. */
+  /* The vw/vh lines are an intentional fallback for browsers without
+     dynamic-viewport-unit support; dvw/dvh track the dynamic viewport (mobile URL bars). */
   width: 100vw;
   height: 100vh;
+  /* biome-ignore lint/suspicious/noDuplicateProperties: progressive-enhancement over vw */
   width: 100dvw;
+  /* biome-ignore lint/suspicious/noDuplicateProperties: progressive-enhancement over vh */
   height: 100dvh;
   touch-action: none;
   outline: none;
@@ -38,7 +41,7 @@ body {
 
 /* Subtle vignette adds depth around the cloud. */
 body::after {
-  content: '';
+  content: "";
   position: fixed;
   inset: 0;
   pointer-events: none;
@@ -121,6 +124,28 @@ body::after {
 .fallback__reload:focus-visible {
   background: rgba(140, 180, 255, 0.2);
   border-color: rgba(140, 180, 255, 0.9);
+}
+
+/* Developer stats HUD (toggle with backtick, or start with ?stats). */
+.stats {
+  position: fixed;
+  top: 0.75rem;
+  left: 0.75rem;
+  margin: 0;
+  padding: 0.5rem 0.7rem;
+  font:
+    12px / 1.4 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
+  color: #aecbff;
+  background: rgba(4, 6, 12, 0.6);
+  border: 1px solid rgba(140, 180, 255, 0.18);
+  border-radius: 8px;
+  white-space: pre;
+  pointer-events: none;
+  z-index: 10;
 }
 
 /* Visible to assistive tech only. */

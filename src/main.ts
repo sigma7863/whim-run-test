@@ -1,9 +1,14 @@
-import { Engine } from './core/Engine';
-import { ParticleField } from './scenes/ParticleField';
-import { Overlay } from './ui/Overlay';
-import { showFallback } from './ui/Fallback';
 import { prefersReducedMotion, supportsWebGL2 } from './core/capabilities';
+import { Engine } from './core/Engine';
+import { installObservability } from './core/observability';
+import { ParticleField } from './scenes/ParticleField';
+import { showFallback } from './ui/Fallback';
+import { Overlay } from './ui/Overlay';
+import { StatsPanel } from './ui/StatsPanel';
 import './style.css';
+
+// Wire error/perf reporting before anything else so early failures are caught.
+installObservability();
 
 const canvas = document.querySelector<HTMLCanvasElement>('#scene');
 if (!canvas) throw new Error('Required <canvas id="scene"> was not found in the document.');
@@ -19,6 +24,9 @@ if (!supportsWebGL2()) {
   try {
     const engine = new Engine(canvas);
     engine.add(new ParticleField(engine, { reducedMotion: prefersReducedMotion() }));
+    // Developer HUD: hidden unless `?stats` is set; toggle live with backtick (`).
+    const showStats = new URLSearchParams(window.location.search).has('stats');
+    engine.add(new StatsPanel(engine.renderer, showStats));
     const overlay = new Overlay();
     engine.start();
 
