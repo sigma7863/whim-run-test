@@ -1,3 +1,4 @@
+import type { DataTexture, PerspectiveCamera, WebGLRenderer } from 'three';
 import {
   AdditiveBlending,
   BufferAttribute,
@@ -10,19 +11,19 @@ import {
   Vector2,
   Vector3,
 } from 'three';
-import type { DataTexture, PerspectiveCamera, WebGLRenderer } from 'three';
 import { GPUComputationRenderer } from 'three/examples/jsm/misc/GPUComputationRenderer.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
-import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import type { Engine, Tickable } from '../core/Engine';
-import { PointerTracker } from '../core/PointerTracker';
 import { KeyboardControl } from '../core/KeyboardControl';
-import { velocityFragment } from './shaders/velocity.frag';
-import { positionFragment } from './shaders/position.frag';
-import { particlesVertex } from './shaders/particles.vert';
+import { fibonacciDirection } from '../core/math';
+import { PointerTracker } from '../core/PointerTracker';
 import { particlesFragment } from './shaders/particles.frag';
+import { particlesVertex } from './shaders/particles.vert';
+import { positionFragment } from './shaders/position.frag';
+import { velocityFragment } from './shaders/velocity.frag';
 
 /** 708² ≈ 501k particles. The single biggest perf lever; PR #3 makes it adaptive. */
 const TEXTURE_SIZE = 708;
@@ -210,17 +211,14 @@ export class ParticleField implements Tickable {
     const pos = position.image.data as Float32Array;
     const vel = velocity.image.data as Float32Array;
     const count = TEXTURE_SIZE * TEXTURE_SIZE;
-    const golden = Math.PI * (3 - Math.sqrt(5));
 
     for (let i = 0; i < count; i++) {
-      const inclination = Math.acos(1 - (2 * (i + 0.5)) / count);
-      const azimuth = golden * i;
+      const dir = fibonacciDirection(i, count);
       const radius = SPHERE_RADIUS * (0.78 + Math.random() * 0.22);
-      const sinI = Math.sin(inclination);
       const k = i * 4;
-      pos[k] = radius * sinI * Math.cos(azimuth);
-      pos[k + 1] = radius * sinI * Math.sin(azimuth);
-      pos[k + 2] = radius * Math.cos(inclination);
+      pos[k] = dir.x * radius;
+      pos[k + 1] = dir.y * radius;
+      pos[k + 2] = dir.z * radius;
       pos[k + 3] = Math.random();
       vel[k] = 0;
       vel[k + 1] = 0;
