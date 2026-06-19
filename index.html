@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#05060a" />
+    <meta name="theme-color" content="#04050a" />
     <meta
       name="description"
       content="An interactive GPGPU particle field rendered with Three.js and built with bun."
@@ -11,7 +11,20 @@
     <title>Particle Field — Three.js + bun</title>
   </head>
   <body>
-    <canvas id="scene" aria-label="Interactive 3D particle field"></canvas>
+    <canvas
+      id="scene"
+      tabindex="0"
+      role="img"
+      aria-label="An interactive particle field: an animated cloud of points that flows and responds to your cursor or the arrow keys."
+      aria-describedby="sr-instructions"
+    ></canvas>
+    <p id="sr-instructions" class="visually-hidden">
+      Move your cursor or use the arrow keys (or WASD) to attract the particles. Click, or press the
+      space bar, to scatter them.
+    </p>
+    <noscript>
+      <p class="fallback"><span>This interactive 3D experience requires JavaScript to run.</span></p>
+    </noscript>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
