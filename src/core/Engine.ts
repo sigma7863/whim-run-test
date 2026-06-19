@@ -36,6 +36,8 @@ export class Engine {
   private readonly maxPixelRatio: number;
   private readonly resizeObserver: ResizeObserver;
   private renderStep: (() => void) | null = null;
+  private onContextLostCb: (() => void) | null = null;
+  private onContextRestoredCb: (() => void) | null = null;
   private width = 1;
   private height = 1;
   private running = false;
@@ -61,6 +63,8 @@ export class Engine {
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(canvas);
     document.addEventListener('visibilitychange', this.handleVisibility);
+    canvas.addEventListener('webglcontextlost', this.handleContextLost as EventListener);
+    canvas.addEventListener('webglcontextrestored', this.handleContextRestored as EventListener);
   }
 
   /** Register a tickable and return it for fluent assignment. */
@@ -88,6 +92,16 @@ export class Engine {
     return () => {
       this.resizeListeners.delete(listener);
     };
+  }
+
+  /** Called when the WebGL context is lost. The loop is already stopped. */
+  onContextLost(cb: () => void): void {
+    this.onContextLostCb = cb;
+  }
+
+  /** Called when a lost WebGL context is restored by the browser. */
+  onContextRestored(cb: () => void): void {
+    this.onContextRestoredCb = cb;
   }
 
   start(): void {
@@ -118,6 +132,16 @@ export class Engine {
     else this.start();
   };
 
+  private readonly handleContextLost = (event: Event): void => {
+    event.preventDefault(); // signals we intend to recover, enabling a restore event
+    this.stop();
+    this.onContextLostCb?.();
+  };
+
+  private readonly handleContextRestored = (): void => {
+    this.onContextRestoredCb?.();
+  };
+
   private resize(): void {
     this.width = this.canvas.clientWidth || window.innerWidth;
     this.height = this.canvas.clientHeight || window.innerHeight;
@@ -133,6 +157,11 @@ export class Engine {
     this.renderStep = null;
     this.resizeObserver.disconnect();
     document.removeEventListener('visibilitychange', this.handleVisibility);
+    this.canvas.removeEventListener('webglcontextlost', this.handleContextLost as EventListener);
+    this.canvas.removeEventListener(
+      'webglcontextrestored',
+      this.handleContextRestored as EventListener,
+    );
     for (const tickable of this.tickables) tickable.dispose?.();
     this.tickables.clear();
     this.resizeListeners.clear();

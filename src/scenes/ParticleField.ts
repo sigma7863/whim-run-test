@@ -18,6 +18,7 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import type { Engine, Tickable } from '../core/Engine';
 import { PointerTracker } from '../core/PointerTracker';
+import { KeyboardControl } from '../core/KeyboardControl';
 import { velocityFragment } from './shaders/velocity.frag';
 import { positionFragment } from './shaders/position.frag';
 import { particlesVertex } from './shaders/particles.vert';
@@ -29,18 +30,24 @@ const SPHERE_RADIUS = 3.2;
 const ATTRACT_STRENGTH = 10;
 const SCATTER_STRENGTH = -24;
 
+export interface ParticleFieldOptions {
+  /** Calm the motion for users who prefer reduced motion (no camera drift). */
+  reducedMotion?: boolean;
+}
+
 /**
  * The centerpiece: ~500k particles simulated entirely on the GPU.
  *
  * Two data textures (position + velocity) are ping-ponged each frame by
  * {@link GPUComputationRenderer}. A divergence-free curl-noise field drives the
- * flow, a soft spring holds the cloud to a sphere, and the pointer attracts /
- * scatters particles. The point cloud is rendered additively and finished with
- * UnrealBloom + ACES tone mapping for a cinematic look.
+ * flow, a soft spring holds the cloud to a sphere, and the pointer (or keyboard)
+ * attracts / scatters particles. The point cloud is rendered additively and
+ * finished with UnrealBloom + ACES tone mapping for a cinematic look.
  */
 export class ParticleField implements Tickable {
   private readonly renderer: WebGLRenderer;
   private readonly camera: PerspectiveCamera;
+  private readonly reducedMotion: boolean;
 
   private readonly gpu: GPUComputationRenderer;
   private readonly positionVariable: ReturnType<GPUComputationRenderer['addVariable']>;
@@ -54,17 +61,23 @@ export class ParticleField implements Tickable {
   private readonly bloomPass: UnrealBloomPass;
 
   private readonly pointer: PointerTracker;
+  private readonly keyboard: KeyboardControl;
   private readonly raycaster = new Raycaster();
   private readonly plane = new Plane(new Vector3(0, 0, 1), 0);
   private readonly pointerWorld = new Vector3();
   private readonly cameraTarget = new Vector3();
+  private readonly activeNdc = new Vector2();
   private readonly unsubscribeResize: () => void;
 
   private pointerInfluence = 0;
 
-  constructor(private readonly engine: Engine) {
+  constructor(
+    private readonly engine: Engine,
+    options: ParticleFieldOptions = {},
+  ) {
     this.renderer = engine.renderer;
     this.camera = engine.camera;
+    this.reducedMotion = options.reducedMotion ?? false;
     engine.scene.background = new Color('#04050a');
 
     // --- GPGPU simulation -------------------------------------------------
@@ -84,6 +97,10 @@ export class ParticleField implements Tickable {
       this.velocityVariable,
     ]);
 
+    // Calmer flow under reduced-motion: weaker turbulence, lower top speed.
+    const curlStrength = this.reducedMotion ? 0.9 : 2.4;
+    const maxSpeed = this.reducedMotion ? 3 : 6;
+
     Object.assign(this.velocityVariable.material.uniforms, {
       uTime: { value: 0 },
       uDelta: { value: 0 },
@@ -92,10 +109,10 @@ export class ParticleField implements Tickable {
       uPointerStrength: { value: ATTRACT_STRENGTH },
       uPointerRadius: { value: 2.2 },
       uCurlScale: { value: 0.35 },
-      uCurlStrength: { value: 2.4 },
+      uCurlStrength: { value: curlStrength },
       uHomeStrength: { value: 1.8 },
       uDamping: { value: 1.2 },
-      uMaxSpeed: { value: 6 },
+      uMaxSpeed: { value: maxSpeed },
       textureDefaultPosition: { value: position0 },
     });
     this.positionVariable.material.uniforms.uDelta = { value: 0 };
@@ -138,6 +155,8 @@ export class ParticleField implements Tickable {
 
     // --- input + engine wiring -------------------------------------------
     this.pointer = new PointerTracker(this.renderer.domElement);
+    this.keyboard = new KeyboardControl(this.renderer.domElement);
+    if (this.reducedMotion) this.camera.position.set(0, 0, 7);
     engine.setRenderStep(() => this.composer.render());
     this.unsubscribeResize = engine.onResize((w, h) => this.handleResize(w, h));
   }
@@ -148,11 +167,18 @@ export class ParticleField implements Tickable {
     uniforms.uDelta.value = dt;
     this.positionVariable.material.uniforms.uDelta.value = dt;
 
-    // Smoothly ramp pointer influence in/out; scatter (negative) while pressed.
-    const target = this.pointer.over ? 1 : 0;
+    // Merge pointer + keyboard into a single virtual attractor.
+    this.keyboard.update(dt);
+    const keyboardActive = this.keyboard.active && !this.pointer.over;
+    const over = this.pointer.over || this.keyboard.active;
+    const down = this.pointer.down || this.keyboard.scatter;
+    this.activeNdc.copy(keyboardActive ? this.keyboard.ndc : this.pointer.ndc);
+
+    // Smoothly ramp influence in/out; scatter (negative) while pressed.
+    const target = over ? 1 : 0;
     this.pointerInfluence += (target - this.pointerInfluence) * Math.min(1, dt * 6);
     uniforms.uPointerActive.value = this.pointerInfluence;
-    uniforms.uPointerStrength.value = this.pointer.down ? SCATTER_STRENGTH : ATTRACT_STRENGTH;
+    uniforms.uPointerStrength.value = down ? SCATTER_STRENGTH : ATTRACT_STRENGTH;
     this.updatePointerWorld();
     (uniforms.uPointer.value as Vector3).copy(this.pointerWorld);
 
@@ -164,13 +190,14 @@ export class ParticleField implements Tickable {
       this.velocityVariable,
     ).texture;
 
-    this.driftCamera(dt, elapsed);
+    if (!this.reducedMotion) this.driftCamera(dt, elapsed);
   }
 
   dispose(): void {
     this.unsubscribeResize();
     this.engine.setRenderStep(null);
     this.pointer.dispose();
+    this.keyboard.dispose();
     this.engine.scene.remove(this.points);
     this.geometry.dispose();
     this.material.dispose();
@@ -223,7 +250,7 @@ export class ParticleField implements Tickable {
   }
 
   private updatePointerWorld(): void {
-    this.raycaster.setFromCamera(this.pointer.ndc, this.camera);
+    this.raycaster.setFromCamera(this.activeNdc, this.camera);
     // Leaves pointerWorld unchanged if the ray is parallel to the plane.
     this.raycaster.ray.intersectPlane(this.plane, this.pointerWorld);
   }
@@ -231,8 +258,8 @@ export class ParticleField implements Tickable {
   private driftCamera(dt: number, elapsed: number): void {
     const t = elapsed * 0.06;
     this.cameraTarget.set(
-      Math.sin(t) * 1.4 + this.pointer.ndc.x * 0.9,
-      Math.cos(t * 0.8) * 0.9 + this.pointer.ndc.y * 0.6,
+      Math.sin(t) * 1.4 + this.activeNdc.x * 0.9,
+      Math.cos(t * 0.8) * 0.9 + this.activeNdc.y * 0.6,
       6.2 + Math.sin(t * 0.5) * 0.6,
     );
     this.camera.position.lerp(this.cameraTarget, 1 - Math.exp(-dt * 1.5));

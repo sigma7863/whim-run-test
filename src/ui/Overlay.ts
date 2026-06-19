@@ -13,7 +13,7 @@ export class Overlay {
     title.textContent = 'Particle Field';
 
     const hint = document.createElement('p');
-    hint.textContent = 'Move to disturb · press to scatter';
+    hint.textContent = 'Move or arrow-keys to disturb · click or space to scatter';
 
     this.root.append(title, hint);
     document.body.appendChild(this.root);
